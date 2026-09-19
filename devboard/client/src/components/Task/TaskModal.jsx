@@ -4,6 +4,14 @@ import { useBoard } from "../../context/BoardContext";
 import { QRCodeSVG } from "qrcode.react";
 
 const TITLE_MAX_LENGTH = 100;
+// The AI generator asks Gemini for "2-3 sentences", which lands around 150 to
+// 400 characters. A budget has to hold that plus a note typed afterwards,
+// otherwise the field cuts off the text the button just produced.
+const DESCRIPTION_MAX_LENGTH = 500;
+// Where the counter starts warning. Kept as fractions so both follow the
+// budget above instead of drifting when it changes.
+const DESCRIPTION_WARN_AT = Math.round(DESCRIPTION_MAX_LENGTH * 0.8);
+const DESCRIPTION_ALERT_AT = Math.round(DESCRIPTION_MAX_LENGTH * 0.92);
 const COPY_SUFFIX = " (copy)";
 
 const COLORS = [
@@ -48,6 +56,14 @@ const TaskModal = ({
       t.title?.toLowerCase().trim() === form.title.toLowerCase().trim() &&
       t._id !== task?._id,
   );
+  // Both counters were computed inline before, the word count twice in a row:
+  // once for the number and once for the plural of "word".
+  const descriptionLength = form.description.length;
+  const descriptionWords = form.description
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
   // Tags are stored the way they were typed, so the list keeps the first
   // spelling it sees and matches case insensitively: typing "rea" should still
   // find an existing "React" rather than nothing.
@@ -91,6 +107,7 @@ const TaskModal = ({
   const [snippetLang, setSnippetLang] = useState("javascript");
   const [loading, setLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // AI Loading & Error States
   const [isGenerating, setIsGenerating] = useState(false);
@@ -236,6 +253,26 @@ const TaskModal = ({
     }
   };
 
+  const handleSaveTemplate = () => {
+    const templates = JSON.parse(
+      localStorage.getItem("task_templates") || "[]",
+    );
+    const newTemplate = {
+      id: Date.now(),
+      name: form.title,
+      title: form.title,
+      description: form.description,
+      priority: form.priority,
+      tags: form.tags,
+    };
+    localStorage.setItem(
+      "task_templates",
+      JSON.stringify([...templates, newTemplate]),
+    );
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
   const handleClose = () => {
     if (isDirty) {
       setConfirmClose(true);
@@ -299,7 +336,7 @@ const TaskModal = ({
               setForm({ ...form, title: e.target.value });
               if (aiError) setAiError("");
             }}
-            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-purple-500"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
           />
           <div className="text-xs text-[var(--text-muted)] text-right -mt-2">
             {form.title.length}/{TITLE_MAX_LENGTH}
@@ -320,7 +357,7 @@ const TaskModal = ({
                 type="button"
                 onClick={handleGenerateAI}
                 disabled={isGenerating || !form.title.trim()}
-                className="text-xs font-medium text-purple-400 hover:text-purple-300 disabled:opacity-40 transition flex items-center gap-1 bg-purple-950/40 border border-purple-800/50 hover:border-purple-600 px-2.5 py-1 rounded-md"
+                className="text-xs font-medium text-[var(--accent)] hover:brightness-125 disabled:opacity-40 transition flex items-center gap-1 bg-[var(--accent-10)] border border-[var(--accent-20)] hover:border-[var(--accent)] px-2.5 py-1 rounded-md"
               >
                 {isGenerating ? "✨ Generating..." : "✨ Generate with AI"}
               </button>
@@ -328,20 +365,32 @@ const TaskModal = ({
 
             <textarea
               placeholder="Description (optional) or generate with AI..."
+              maxLength={DESCRIPTION_MAX_LENGTH}
               value={form.description}
               onChange={(e) =>
                 setForm({ ...form, description: e.target.value })
               }
               rows={3}
-              className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-purple-500 resize-none"
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] resize-none"
             />
 
-            <p className="text-[10px] text-[var(--text-secondary)] mt-1">
-              {form.description.trim().split(/\s+/).filter(Boolean).length} word
-              {form.description.trim().split(/\s+/).filter(Boolean).length !== 1
-                ? "s"
-                : ""}
-            </p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-[10px] text-[var(--text-secondary)]">
+                {descriptionWords} word{descriptionWords !== 1 ? "s" : ""}
+              </p>
+              <p
+                className={`text-[10px] transition-colors ${
+                  descriptionLength >= DESCRIPTION_ALERT_AT
+                    ? "text-red-400 font-medium"
+                    : descriptionLength >= DESCRIPTION_WARN_AT
+                      ? "text-yellow-400"
+                      : "text-[var(--text-muted)]"
+                }`}
+              >
+                {descriptionLength}/{DESCRIPTION_MAX_LENGTH}
+                {descriptionLength >= DESCRIPTION_ALERT_AT && " almost full"}
+              </p>
+            </div>
 
             {aiError && <p className="text-xs text-red-400 mt-1">{aiError}</p>}
           </div>
@@ -350,7 +399,7 @@ const TaskModal = ({
             <select
               value={form.status}
               onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-purple-500"
+              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
             >
               <option value="backlog">Backlog</option>
               <option value="inprogress">In Progress</option>
@@ -361,7 +410,7 @@ const TaskModal = ({
             <select
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-purple-500"
+              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
             >
               <option value="low">Low Priority</option>
               <option value="medium">Medium Priority</option>
@@ -395,7 +444,7 @@ const TaskModal = ({
             placeholder="Tags (comma separated: react, api, bug)"
             value={form.tags}
             onChange={(e) => setForm({ ...form, tags: e.target.value })}
-            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-purple-500"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
           />
 
           {tagSuggestions.length > 0 && (
@@ -406,7 +455,7 @@ const TaskModal = ({
                   type="button"
                   onClick={() => applyTagSuggestion(tag)}
                   title={`Use the existing tag ${tag}`}
-                  className="text-[10px] px-2 py-0.5 bg-[var(--bg-muted)] text-[var(--text-secondary)] rounded-full hover:text-purple-400 transition"
+                  className="text-[10px] px-2 py-0.5 bg-[var(--bg-muted)] text-[var(--text-secondary)] rounded-full hover:text-[var(--accent)] transition"
                 >
                   + {tag}
                 </button>
@@ -422,7 +471,7 @@ const TaskModal = ({
               onChange={(e) =>
                 setForm({ ...form, githubIssueUrl: e.target.value })
               }
-              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-purple-500"
+              className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
             />
             <input
               type="number"
@@ -431,7 +480,7 @@ const TaskModal = ({
               onChange={(e) =>
                 setForm({ ...form, githubIssueNumber: e.target.value })
               }
-              className="w-16 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-purple-500"
+              className="w-16 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
 
@@ -517,13 +566,13 @@ const TaskModal = ({
             type="date"
             value={form.dueDate}
             onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-purple-500"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
           />
 
           <select
             value={form.estimate || ""}
             onChange={(e) => setForm({ ...form, estimate: e.target.value })}
-            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-purple-500"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
           >
             <option value="">No estimate</option>
             <option value="30m">30 minutes</option>
@@ -563,7 +612,7 @@ const TaskModal = ({
               <button
                 onClick={handleExportJSON}
                 title="Export as JSON"
-                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50"
+                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               >
                 📤
               </button>
@@ -573,7 +622,7 @@ const TaskModal = ({
                 onClick={handleDuplicate}
                 disabled={duplicating || !form.title.trim()}
                 title="Duplicate task"
-                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50 disabled:opacity-40"
+                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-40"
               >
                 📄
               </button>
@@ -597,11 +646,20 @@ const TaskModal = ({
                   toast.success("Share link copied to clipboard");
                 }}
                 title="Copy share link"
-                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50"
+                className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               >
                 🔗
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleSaveTemplate}
+              disabled={!form.title.trim()}
+              title={saved ? "Saved!" : "Save as reusable template"}
+              className="p-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 rounded-lg transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-40"
+            >
+              {saved ? "✅" : "💾"}
+            </button>
           </div>
 
           <div className="flex items-center flex-wrap justify-end gap-2">
@@ -643,7 +701,7 @@ const TaskModal = ({
             <button
               onClick={handleSave}
               disabled={loading || !form.title.trim() || isDuplicate}
-              className="shrink-0 whitespace-nowrap px-5 py-2 text-sm bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition disabled:opacity-40"
+              className="shrink-0 whitespace-nowrap px-5 py-2 text-sm bg-[var(--accent)] hover:brightness-110 text-white rounded-lg font-medium transition disabled:opacity-40"
             >
               {loading
                 ? "Saving..."
